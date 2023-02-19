@@ -194,6 +194,7 @@ class ResnetBlock(nn.Module):
 
         self.block1 = Block(dim, dim_out, groups = groups)
         self.block2 = Block(dim_out, dim_out, groups = groups)
+        self.drop = torch.nn.Dropout(0.1)
         self.res_conv = nn.Conv2d(dim, dim_out, 1) if dim != dim_out else nn.Identity()
 
     def forward(self, x, time_emb = None):
@@ -204,7 +205,7 @@ class ResnetBlock(nn.Module):
             scale_shift = time_emb.chunk(2, dim = 1)
 
         h = self.block1(x, scale_shift = scale_shift)
-        h = torch.nn.Dropout(0.1)
+        h = self.drop(h)
         h = self.block2(h)
 
         return h + self.res_conv(x)
