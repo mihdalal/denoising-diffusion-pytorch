@@ -129,5 +129,5 @@ while iters < num_iterations:
                     filename=prefix + "fid_vs_iterations",
                 )
 
-score = get_fid(diffusion, "cifar10", 32, 32*32*3, batch_size=256, num_gen=10_000)
+score = get_fid(diffusion, "cifar10", 32, 32*32*3, batch_size=256, num_gen=50_000)
 print("FID: ", score)
