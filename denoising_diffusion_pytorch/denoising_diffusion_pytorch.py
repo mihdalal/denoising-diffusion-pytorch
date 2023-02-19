@@ -205,7 +205,7 @@ class ResnetBlock(nn.Module):
             scale_shift = time_emb.chunk(2, dim = 1)
 
         h = self.block1(x, scale_shift = scale_shift)
-
+        h = torch.nn.DropOut(0.1)
         h = self.block2(h)
 
         return h + self.res_conv(x)

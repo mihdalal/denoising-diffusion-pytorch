@@ -3,7 +3,7 @@ import torchvision
 from denoising_diffusion_pytorch import Unet, GaussianDiffusion
 from tqdm import tqdm
 from torch.utils.data import DataLoader
-from torchvision.transforms import Compose, ToTensor, Lambda
+from torchvision.transforms import Compose, ToTensor, Lambda, RandomHorizontalFlip
 from torchvision.utils import save_image
 from cleanfid import fid as cleanfid
 import os
@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 from glob import glob
 from PIL import Image
 from torchvision.datasets import VisionDataset
+from ema_pytorch import EMA
 
 def save_plot(x, y, xlabel, ylabel, title, filename):
     plt.plot(x, y)
@@ -57,12 +58,13 @@ batch_size = 128
 # define image transformations (e.g. using torchvision)
 transform = Compose([
                 ToTensor(),
-                Lambda(lambda t: (t * 2) - 1)
+                Lambda(lambda t: (t * 2) - 1),
+                RandomHorizontalFlip()
             ])
 
 # dataset = torchvision.datasets.CIFAR10(root='../sp23_vlr_hw2/datasets/CUB_200_2011_32/', train=True, transform=transform)
 dataloader = torch.utils.data.DataLoader(
-        Dataset(root="../datasets/CUB_200_2011_32", transform=transform),
+        Dataset(root="../sp23_vlr_hw2/datasets/CUB_200_2011_32/", transform=transform),
         batch_size=batch_size,
         shuffle=True,
         num_workers=4,
@@ -71,18 +73,19 @@ dataloader = torch.utils.data.DataLoader(
 
 model = Unet(
     dim = 64,
-    dim_mults = (1, 2, 4, 8),
+    dim_mults = (1, 2, 4),
     channels = channels,
     self_condition=True
 ).cuda()
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 
 diffusion = GaussianDiffusion(
     model,
     image_size = image_size,
     timesteps = 250,   # number of steps
-    loss_type = 'l1',    # L1 or L2
+    loss_type = 'l2',    # L1 or L2
+    beta_schedule='linear'
 ).cuda()
 scaler = torch.cuda.amp.GradScaler()
 amp_enabled = False
@@ -93,12 +96,16 @@ fids_list = []
 iters_list = []
 prefix = "data_diffusion/"
 os.makedirs(prefix, exist_ok=True)
+ema_decay = .9999
+ema_update_every = 10
+
+ema = EMA(diffusion, beta = ema_decay, update_every = ema_update_every)
 while iters < num_iterations:
-    for training_images, _ in dataloader:
+    for training_images in dataloader:
         with torch.cuda.amp.autocast(enabled=amp_enabled):
             training_images = training_images.cuda() # images are normalized from 0 to 1
             loss = diffusion(training_images)
-
+        torch.nn.utils.clip_grad_norm_(diffusion.parameters(), 1.0)
         optimizer.zero_grad(set_to_none=True)
         scaler.scale(loss).backward()
         scaler.step(optimizer)
@@ -106,6 +113,7 @@ while iters < num_iterations:
         pbar.update(1)
         pbar.set_description("Iteration: {}, Loss: {}".format(iters, loss))
         iters += 1
+        ema.update()
         with torch.cuda.amp.autocast(enabled=amp_enabled):
             if iters % 1000 == 0:
                 fid = get_fid(diffusion, "cub", 32, 32*32*3, batch_size=256, num_gen=1024)
@@ -113,7 +121,6 @@ while iters < num_iterations:
                 fids_list.append(fid)
                 iters_list.append(iters)
                 sampled_images = diffusion.sample(batch_size = 100)
-                sampled_images.shape # (4, 3, 128, 128)
                 # save images to disk in grid form
                 save_image(
                     sampled_images.data.float(),
