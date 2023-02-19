@@ -73,7 +73,7 @@ dataloader = torch.utils.data.DataLoader(
 
 model = Unet(
     dim = 64,
-    dim_mults = (1, 2, 4),
+    dim_mults = (1, 2, 4, 8),
     channels = channels,
     self_condition=True
 ).cuda()
@@ -83,7 +83,10 @@ optimizer = torch.optim.Adam(model.parameters(), lr=2e-4)
 diffusion = GaussianDiffusion(
     model,
     image_size = image_size,
-    timesteps = 250,   # number of steps
+    timesteps=250,   # number of timesteps
+    # timesteps=1000,   # number of timesteps
+    # sampling_timesteps=100,
+    # ddim_sampling_eta=0,
     loss_type = 'l2',    # L1 or L2
     beta_schedule='linear'
 ).cuda()
@@ -94,7 +97,7 @@ iters = 0
 pbar = tqdm(total = num_iterations)
 fids_list = []
 iters_list = []
-prefix = "data_diffusion/"
+prefix = "data_diffusion_big_v3/"
 os.makedirs(prefix, exist_ok=True)
 ema_decay = .9999
 ema_update_every = 10
@@ -115,8 +118,8 @@ while iters < num_iterations:
         iters += 1
         ema.update()
         with torch.cuda.amp.autocast(enabled=amp_enabled):
-            if iters % 1000 == 0:
-                fid = get_fid(diffusion, "cub", 32, 32*32*3, batch_size=256, num_gen=1024)
+            if iters % 10000 == 0:
+                fid = get_fid(diffusion, "cub", 32, 32*32*3, batch_size=128, num_gen=10_000)
                 print(f"Iteration {iters} FID: {fid}")
                 fids_list.append(fid)
                 iters_list.append(iters)
@@ -135,6 +138,8 @@ while iters < num_iterations:
                     title="FID vs Iterations",
                     filename=prefix + "fid_vs_iterations",
                 )
+                torch.save(diffusion, prefix + f"{iters}_{fid}_diffusion.pt")
+    torch.save(diffusion, prefix + "diffusion.pt")
 
 score = get_fid(diffusion, "cifar10", 32, 32*32*3, batch_size=256, num_gen=50_000)
 print("FID: ", score)
